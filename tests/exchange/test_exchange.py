@@ -3464,9 +3464,7 @@ def test_set_margin_mode(mocker, default_conf, collateral):
 
     ("binance", TradingMode.FUTURES, Collateral.ISOLATED, False),
     ("gateio", TradingMode.FUTURES, Collateral.ISOLATED, False),
-
-    # ("okex", TradingMode.FUTURES, Collateral.ISOLATED, False), # TODO-lev: uncomment once impleme
-    ("okex", TradingMode.FUTURES, Collateral.ISOLATED, True),  # TODO-lev: remove once implemented
+    ("okex", TradingMode.FUTURES, Collateral.ISOLATED, False),
 
     # * Remove once implemented
     ("binance", TradingMode.MARGIN, Collateral.CROSS, True),
@@ -3569,11 +3567,11 @@ def test_calculate_funding_fees(
     funding_rates = DataFrame([
         {'date': prior_date, 'open': funding_rate},  # Line not used.
         {'date': trade_date, 'open': funding_rate},
-        ])
+    ])
     mark_rates = DataFrame([
         {'date': prior_date, 'open': mark_price},
         {'date': trade_date, 'open': mark_price},
-        ])
+    ])
     df = exchange.combine_funding_and_mark(funding_rates, mark_rates)
 
     assert exchange.calculate_funding_fees(
