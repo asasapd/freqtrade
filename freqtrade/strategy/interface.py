@@ -567,22 +567,45 @@ class IStrategy(ABC, HyperStrategyMixin):
         """
         if not self.dp:
             raise OperationalException("DataProvider not found.")
-        dataframe = self.dp.ohlcv(pair, self.timeframe)
-        if not isinstance(dataframe, DataFrame) or dataframe.empty:
-            logger.warning('Empty candle (OHLCV) data for pair %s', pair)
-            return
-
-        try:
-            df_len, df_close, df_date = self.preserve_df(dataframe)
-
+        if self.config['single_transactions']:
+            dataframe = self.dp.single_transactions(pair)
+            
             dataframe = strategy_safe_wrapper(
-                self._analyze_ticker_internal, message=""
-            )(dataframe, {'pair': pair})
+                    self._analyze_ticker_internal, message=""
+                )(dataframe, {'pair': pair})
+            
+            # Check dataframe integrity
+            # try:
+            #     df_len, df_close, df_date = self.preserve_df(dataframe)
 
-            self.assert_df(dataframe, df_len, df_close, df_date)
-        except StrategyError as error:
-            logger.warning(f"Unable to analyze candle (OHLCV) data for pair {pair}: {error}")
-            return
+            #     dataframe = strategy_safe_wrapper(
+            #         self._analyze_ticker_internal, message=""
+            #     )(dataframe, {'pair': pair})
+
+            #     self.assert_df(dataframe, df_len, df_close, df_date)
+            # except StrategyError as error:
+            #     logger.warning(f"Unable to analyze candle (OHLCV) data for pair {pair}: {error}")
+            #     return
+            if not isinstance(dataframe, DataFrame) or dataframe.empty:
+                logger.warning('Empty transactions data for pair %s', pair)
+                return
+        else:
+            dataframe = self.dp.ohlcv(pair, self.timeframe)
+            if not isinstance(dataframe, DataFrame) or dataframe.empty:
+                logger.warning('Empty candle (OHLCV) data for pair %s', pair)
+                return
+
+            try:
+                df_len, df_close, df_date = self.preserve_df(dataframe)
+
+                dataframe = strategy_safe_wrapper(
+                    self._analyze_ticker_internal, message=""
+                )(dataframe, {'pair': pair})
+
+                self.assert_df(dataframe, df_len, df_close, df_date)
+            except StrategyError as error:
+                logger.warning(f"Unable to analyze candle (OHLCV) data for pair {pair}: {error}")
+                return
 
         if dataframe.empty:
             logger.warning('Empty dataframe for pair %s', pair)
