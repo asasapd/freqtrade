@@ -4936,9 +4936,9 @@ def test_update_funding_fees(
     freqtrade = get_patched_freqtradebot(mocker, default_conf)
 
     # initial funding fees,
-    freqtrade.execute_entry('ETH/BTC', 123, is_short=is_short)
-    freqtrade.execute_entry('LTC/BTC', 2.0, is_short=is_short)
-    freqtrade.execute_entry('XRP/BTC', 123, is_short=is_short)
+    freqtrade.execute_entry('ETH/USDT', 123, is_short=is_short)
+    freqtrade.execute_entry('LTC/USDT', 2.0, is_short=is_short)
+    freqtrade.execute_entry('XRP/USDT', 123, is_short=is_short)
     multipl = 1 if is_short else -1
     trades = Trade.get_open_trades()
     assert len(trades) == 3
