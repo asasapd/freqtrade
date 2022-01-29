@@ -16,6 +16,7 @@ from freqtrade.data.history import load_pair_history
 from freqtrade.enums import RunMode
 from freqtrade.exceptions import ExchangeError, OperationalException
 from freqtrade.exchange import Exchange, timeframe_to_seconds
+import arrow
 
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class DataProvider:
         self.__cached_pairs: Dict[PairWithTimeframe, Tuple[DataFrame, datetime]] = {}
         self.__slice_index: Optional[int] = None
         self.__cached_pairs_backtesting: Dict[PairWithTimeframe, DataFrame] = {}
+        self.__cached_pairs_backtesting: Optional[DataFrame] = None 
 
     def _set_dataframe_max_index(self, limit_index: int):
         """
@@ -177,6 +179,67 @@ class DataProvider:
             raise OperationalException(NO_EXCHANGE_EXCEPTION)
         return list(self._exchange._klines.keys())
 
+    def single_transactions(self, pair: str) -> DataFrame:
+        """
+        Download trade history from the exchange.
+        Appends to previously downloaded trades data.
+        """
+        try:
+
+            # until = None
+            # if (timerange and timerange.starttype == 'date'):
+            #     since = timerange.startts * 1000
+            #     if timerange.stoptype == 'date':
+            #         until = timerange.stopts * 1000
+            # else:
+            import time
+            for i in range(0, 100):
+                since = arrow.utcnow().shift(minutes=-5).int_timestamp * 1000
+                until = arrow.utcnow().int_timestamp * 1000
+                
+                # if trades and since < trades[0][0]:
+                #     # since is before the first trade
+                #     logger.info(f"Start earlier than available data. Redownloading trades for {pair}...")
+                #     trades = []
+
+                # from_id = trades[-1][1] if trades else None
+                # if trades and since < trades[-1][0]:
+                #     # Reset since to the last available point
+                #     # - 5 seconds (to ensure we're getting all trades)
+                #     since = trades[-1][0] - (5 * 1000)
+                #     logger.info(f"Using last trade date -5s - Downloading trades for {pair} "
+                #                 f"since: {format_ms_time(since)}.")
+
+                # logger.debug(f"Current Start: {format_ms_time(trades[0][0]) if trades else 'None'}")
+                # logger.debug(f"Current End: {format_ms_time(trades[-1][0]) if trades else 'None'}")
+                # logger.info(f"Current Amount of trades: {len(trades)}")
+
+                # Default since_ms to 30 days if nothing is given
+                new_trades = self._exchange.get_historic_trades(pair=pair,
+                                                        since=since,
+                                                        until=until,
+                                                        from_id=None,
+                                                        )
+                # trades.extend(new_trades[1])
+                # # Remove duplicates to make sure we're not storing data we don't need
+                # trades = trades_remove_duplicates(trades)
+                # data_handler.trades_store(pair, data=trades)
+
+                # logger.debug(f"New Start: {format_ms_time(trades[0][0])}")
+                # logger.debug(f"New End: {format_ms_time(trades[-1][0])}")
+                # logger.info(f"New Amount of trades: {len(trades)}")
+                print(arrow.get(new_trades[1][-1][0]/1000))
+                print(arrow.utcnow())
+                print("-----------")
+                time.sleep(2)
+            return new_trades
+
+        except Exception:
+            logger.exception(
+                f'Failed to download single transactions trades for pair: "{pair}". '
+            )
+            return DataFrame()
+        
     def ohlcv(self, pair: str, timeframe: str = None, copy: bool = True) -> DataFrame:
         """
         Get candle (OHLCV) data for the given pair as DataFrame
