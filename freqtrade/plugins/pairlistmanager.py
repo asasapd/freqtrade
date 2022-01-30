@@ -3,7 +3,7 @@ PairList manager class
 """
 import logging
 from functools import partial
-from typing import Dict, List
+from typing import Dict, List, Union
 
 from cachetools import TTLCache, cached
 
@@ -139,8 +139,10 @@ class PairListManager(LoggingMixin):
             return []
         return whitelist
 
-    def create_pair_list(self, pairs: List[str], timeframe: str = None) -> ListPairsWithTimeframes:
+    def create_pair_list(self, pairs: List[str], timeframe: str = None, single_transactions: bool = False) -> Union[ListPairsWithTimeframes, List[str]]:
         """
-        Create list of pair tuples with (pair, timeframe)
+        Create list of pair tuples with (pair, timeframe) or list of pair if single_transactions is True
         """
-        return [(pair, timeframe or self._config['timeframe']) for pair in pairs]
+        if not single_transactions:
+            return [(pair, timeframe or self._config['timeframe']) for pair in pairs]
+        return [pair for pair in pairs]

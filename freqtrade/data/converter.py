@@ -15,7 +15,19 @@ from freqtrade.constants import DEFAULT_DATAFRAME_COLUMNS, DEFAULT_TRADES_COLUMN
 
 logger = logging.getLogger(__name__)
 
-
+def transactions_to_dataframe(transactions: list, pair: str, *,
+                       fill_missing: bool = True) -> DataFrame:
+    cols = DEFAULT_TRADES_COLUMNS
+    df = DataFrame(transactions, columns=cols)
+    
+    df['date'] = to_datetime(df['timestamp'], unit='ms', utc=True, infer_datetime_format=True)
+    
+    df = df.astype(dtype={'price': 'float', 'amount': 'float', 'cost': 'float'})
+    
+    return clean_transactions_dataframe(df, pair,
+                                 fill_missing=fill_missing,
+                                 )
+    
 def ohlcv_to_dataframe(ohlcv: list, timeframe: str, pair: str, *,
                        fill_missing: bool = True, drop_incomplete: bool = True) -> DataFrame:
     """
@@ -44,7 +56,25 @@ def ohlcv_to_dataframe(ohlcv: list, timeframe: str, pair: str, *,
                                  fill_missing=fill_missing,
                                  drop_incomplete=drop_incomplete)
 
-
+def clean_transactions_dataframe(data: DataFrame, pair: str, *,
+                          fill_missing: bool = True,
+                          ) -> DataFrame:
+    # Remove duplicates
+    data = data.groupby(by='id', as_index=False, sort=True).agg({
+        'price': 'max',
+        'cost': 'max',
+        'amount': 'max',
+        'price': 'max',
+        'side': 'max',
+        'date': 'max'
+    })
+    
+    if fill_missing:
+        print("Fill missing not implemented!!!!!")
+        return data
+    else:
+        return data
+    
 def clean_ohlcv_dataframe(data: DataFrame, timeframe: str, pair: str, *,
                           fill_missing: bool = True,
                           drop_incomplete: bool = True) -> DataFrame:
@@ -79,7 +109,8 @@ def clean_ohlcv_dataframe(data: DataFrame, timeframe: str, pair: str, *,
     else:
         return data
 
-
+    
+    
 def ohlcv_fill_up_missing_data(dataframe: DataFrame, timeframe: str, pair: str) -> DataFrame:
     """
     Fills up missing data with 0 volume rows,

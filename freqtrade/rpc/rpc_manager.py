@@ -82,7 +82,8 @@ class RPCManager:
         minimal_roi = config['minimal_roi']
         stoploss = config['stoploss']
         trailing_stop = config['trailing_stop']
-        timeframe = config['timeframe']
+        timeframe = config['timeframe'] 
+        sinlge_transactions = config.get("single_transactions", False) # To Be moved up
         exchange_name = config['exchange']['name']
         strategy_name = config.get('strategy', '')
         pos_adjust_enabled = 'On' if config['position_adjustment_enable'] else 'Off'

@@ -9,6 +9,7 @@ import logging
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from math import ceil
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import arrow
@@ -21,7 +22,7 @@ from pandas import DataFrame
 
 from freqtrade.constants import (DEFAULT_AMOUNT_RESERVE_PERCENT, NON_OPEN_EXCHANGE_STATES,
                                  ListPairsWithTimeframes)
-from freqtrade.data.converter import ohlcv_to_dataframe, trades_dict_to_list
+from freqtrade.data.converter import ohlcv_to_dataframe, trades_dict_to_list, transactions_to_dataframe
 from freqtrade.exceptions import (DDosProtection, ExchangeError, InsufficientFundsError,
                                   InvalidOrderException, OperationalException, PricingError,
                                   RetryableOrderError, TemporaryError)
@@ -91,7 +92,7 @@ class Exchange:
         self._config.update(config)
 
         # Holds last candle refreshed time of each pair
-        self._pairs_last_refresh_time: Dict[Tuple[str, str], int] = {}
+        self._pairs_last_refresh_time: Dict[Tuple[str, Optional[str]], int] = {}
         # Timestamp of last markets refresh
         self._last_markets_refresh: int = 0
 
@@ -106,6 +107,9 @@ class Exchange:
         # Holds candles
         self._klines: Dict[Tuple[str, str], DataFrame] = {}
 
+        #Holds single transactions
+        self._single_transactions: Dict[str, DataFrame] = {}
+        
         # Holds all open sell orders for dry_run
         self._dry_run_open_orders: Dict[str, Any] = {}
         remove_credentials(config)
@@ -313,6 +317,12 @@ class Exchange:
                 symbol_parts[1] == market.get('quote')
                 )
 
+    def single_transaction(self, pair: str, copy: bool = True) -> DataFrame:
+        if pair in self._single_transactions:
+            return self._single_transactions[pair].copy() if copy else self._single_transactions[pair]
+        else:
+            return DataFrame()
+        
     def klines(self, pair_interval: Tuple[str, str], copy: bool = True) -> DataFrame:
         if pair_interval in self._klines:
             return self._klines[pair_interval].copy() if copy else self._klines[pair_interval]
@@ -1294,6 +1304,80 @@ class Exchange:
         data = sorted(data, key=lambda x: x[0])
         return pair, timeframe, data
 
+    # WIP
+    def refresh_latest_single_transactions(self, pair_list: List, *,
+                             since_ms: Optional[int] = None, cache: bool = True
+                             ) -> Dict[Tuple[str], DataFrame]:
+        """
+        Refresh in-memory single_transactins asynchronously and set `_single_transactions` with the result
+        Loops asynchronously over pair_list and downloads all pairs async (semi-parallel).
+        Only used in the dataprovider.refresh_single_transactions() method.
+        :param pair_list: List of pair
+        :param since_ms: time since when to download, in milliseconds
+        :param cache: Assign result to _single_transactions. Usefull for one-off downloads like for pairlists
+        :return: Dict of [{pair: Dataframe}]
+        """
+        logger.debug("Refreshing single_transactions data for %d pairs", len(pair_list))
+
+        
+        results = {}
+        cached_pairs = []
+        # Gather coroutines to run
+        for pair in set(pair_list):
+            results[pair] = []
+            if (pair not in self._single_transactions or not cache
+                    or self._now_is_time_to_refresh(pair, None)): # Need to be refreshed
+                if not since_ms and 1000 > 1: # Not since and more than one candle
+                    # Multiple calls for one pair - to get more history
+                    one_call = 60000 * 1 # Max 10 minutes
+                    # move_to = one_call * self.required_candle_call_count
+                    # move_to = 604800000 # 1 week
+                    move_to = 60000 * 5 # 1 week
+                    now = self._pairs_last_refresh_time.get((pair, None), arrow.utcnow())
+                    since_ms = int((now - timedelta(seconds=move_to // 1000)).timestamp() * 1000)
+
+                if since_ms:
+                    results[pair].extend(self._fetch_trades_end(
+                        pair, since=since_ms, end=now.timestamp()*1000))
+                else:
+                    # One call ... "regular" refresh
+                    results[pair].extend(self._fetch_trades_end(
+                        pair, since=since_ms, end=now.timestamp()*1000))
+            else:
+                logger.debug(
+                    "Using cached single_transacations data for pair %s ...",
+                    pair
+                )
+                cached_pairs.append(pair)
+        
+        results_df = {}
+        for pair, transactions in results.items():
+            if len(transactions) > 0:
+                self._pairs_last_refresh_time[(pair, None)] = transactions[-1][0] // 1000
+                transactions_df = transactions_to_dataframe(
+                    transactions, pair=pair, fill_missing=True
+                )
+                old = self.single_transaction(pair, copy=False)
+                if len(old) > 0:
+                    print("Need to merge")
+                    # transactions_df = merge_transactions(old, transactions_df)
+                if cache:
+                    self._single_transactions[pair] = transactions_df
+                results_df[pair] = transactions_df
+                # # keeping parsed dataframe in cache
+                # ohlcv_df = ohlcv_to_dataframe(
+                #     ticks, timeframe, pair=pair, fill_missing=True,
+                #     drop_incomplete=self._ohlcv_partial_candle)
+                # results_df[(pair, timeframe)] = ohlcv_df
+                # if cache:
+                #     self._klines[(pair, timeframe)] = ohlcv_df
+
+        # Return cached klines
+        for pair in cached_pairs:
+            results_df[pair] = self.single_transaction(pair, copy=False)
+
+        return results_df
+    
     def refresh_latest_ohlcv(self, pair_list: ListPairsWithTimeframes, *,
                              since_ms: Optional[int] = None, cache: bool = True
                              ) -> Dict[Tuple[str, str], DataFrame]:
@@ -1367,13 +1451,15 @@ class Exchange:
 
         return results_df
 
-    def _now_is_time_to_refresh(self, pair: str, timeframe: str) -> bool:
-        # Timeframe in seconds
-        interval_in_sec = timeframe_to_seconds(timeframe)
-
+    def _now_is_time_to_refresh(self, pair: str, timeframe: Optional[str]) -> bool:
+        if timeframe:
+            # Timeframe in seconds
+            interval_in_sec = timeframe_to_seconds(timeframe)
+        else:
+            interval_in_sec = 30
         return not ((self._pairs_last_refresh_time.get((pair, timeframe), 0)
-                     + interval_in_sec) >= arrow.utcnow().int_timestamp)
-
+                    + interval_in_sec) >= arrow.utcnow().int_timestamp)
+    
     @retrier_async
     async def _async_get_candle_history(self, pair: str, timeframe: str,
                                         since_ms: Optional[int] = None) -> Tuple[str, str, List]:
@@ -1422,7 +1508,64 @@ class Exchange:
                                        f'for pair {pair}. Message: {e}') from e
 
     # Fetch historic trades
+    def _fetch_trades_end(self, pair: str,
+                                  since: Optional[int] = None,
+                                  end: Optional[int] = None,
+                                  params: Optional[dict] = None) -> List[List]:
+        """
+        # gets trade history using fetch_trades.
+        # Handles exchange errors, does one call to the exchange.
+        # :param pair: Pair to fetch trade data for
+        # :param since: Since as integer timestamp in milliseconds
+        # returns: List of dicts containing trades
+        """
+        trades = []
+        try:
+            # fetch trades asynchronously
+            ten_minutes = 60000 * 10
+            if params:
+                logger.debug("Fetching trades for pair %s, params: %s ", pair, params)
+                orders = self._api.fetch_trades(pair, since)
+            else:
+                logger.debug(
+                    "Fetching trades for pair %s, since %s %s...",
+                    pair,  since,
+                    '(' + arrow.get(since // 1000).isoformat() + ') ' if since is not None else ''
+                )
+                while since < end:
+                    print('since: ' + str(since)) #uncomment this line of code for verbose download
+                    try:
+                        orders = self._api.fetch_trades(pair, since)
+                    except ccxt.RequestTimeout:
+                        time.sleep(5)
+                        orders = self._api.fetch_trades(pair, since)
 
+                    if len(orders) > 0:
+
+                        latest_ts = orders[-1]['timestamp']
+                        if since != latest_ts:
+                            since = latest_ts
+                        else:
+                            since += ten_minutes
+
+                        trades.extend(orders)
+                    else:
+                        since += ten_minutes
+            return trades_dict_to_list(trades)
+        except ccxt.NotSupported as e:
+            raise OperationalException(
+                f'Exchange {self._api.name} does not support fetching historical trade data.'
+                f'Message: {e}') from e
+        except ccxt.DDoSProtection as e:
+            raise DDosProtection(e) from e
+        except (ccxt.NetworkError, ccxt.ExchangeError) as e:
+            raise TemporaryError(f'Could not load trade history due to {e.__class__.__name__}. '
+                                 f'Message: {e}') from e
+        except ccxt.BaseError as e:
+            raise OperationalException(f'Could not fetch trade data. Msg: {e}') from e
+        except Exception as e:
+            print(e)
+        
     @retrier_async
     async def _async_fetch_trades(self, pair: str,
                                   since: Optional[int] = None,

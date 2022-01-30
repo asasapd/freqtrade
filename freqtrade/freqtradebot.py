@@ -158,8 +158,13 @@ class FreqtradeBot(LoggingMixin):
         self.active_pair_whitelist = self._refresh_active_whitelist(trades)
 
         # Refreshing candles
-        self.dataprovider.refresh(self.pairlists.create_pair_list(self.active_pair_whitelist),
-                                  self.strategy.gather_informative_pairs())
+        if self.config.get('single_transactions', False):
+            self.dataprovider.refresh_single_transactions(
+                self.pairlists.create_pair_list(self.active_pair_whitelist, single_transactions=True)
+            )
+        else:
+            self.dataprovider.refresh(self.pairlists.create_pair_list(self.active_pair_whitelist),
+                                    self.strategy.gather_informative_pairs())
 
         strategy_safe_wrapper(self.strategy.bot_loop_start, supress_error=True)()
 

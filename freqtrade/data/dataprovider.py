@@ -169,6 +169,16 @@ class DataProvider:
         else:
             self._exchange.refresh_latest_ohlcv(pairlist)
 
+    def refresh_single_transactions(self,
+                pairlist: List[str]) -> None:
+        """
+        Refresh single_transactions data, called with each cycle 
+        """
+        if self._exchange is None:
+            raise OperationalException(NO_EXCHANGE_EXCEPTION)
+        
+        self._exchange.refresh_latest_single_transactions(pairlist)
+        
     @property
     def available_pairs(self) -> ListPairsWithTimeframes:
         """
@@ -179,11 +189,19 @@ class DataProvider:
             raise OperationalException(NO_EXCHANGE_EXCEPTION)
         return list(self._exchange._klines.keys())
 
-    def single_transactions(self, pair: str) -> DataFrame:
+    def single_transactions(self, pair: str, copy: bool = True) -> DataFrame:
         """
         Download trade history from the exchange.
         Appends to previously downloaded trades data.
         """
+        if self._exchange is None:
+            raise OperationalException(NO_EXCHANGE_EXCEPTION)
+        if self.runmode in (RunMode.DRY_RUN, RunMode.LIVE):
+            return self._exchange.single_transaction(pair,
+                                         copy=copy)
+        else:
+            return DataFrame()
+        
         try:
 
             # until = None

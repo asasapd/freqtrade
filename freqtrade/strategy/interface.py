@@ -439,7 +439,7 @@ class IStrategy(ABC, HyperStrategyMixin):
 # END - Intended to be overridden by strategy
 ###
 
-    def gather_informative_pairs(self) -> ListPairsWithTimeframes:
+    def gather_informative_pairs(self, single_transactions: bool = False) -> Union[ListPairsWithTimeframes, List[str]]:
         """
         Internal method which gathers all informative pairs (user or automatically defined).
         """
@@ -570,9 +570,9 @@ class IStrategy(ABC, HyperStrategyMixin):
         if self.config['single_transactions']:
             dataframe = self.dp.single_transactions(pair)
             
-            dataframe = strategy_safe_wrapper(
-                    self._analyze_ticker_internal, message=""
-                )(dataframe, {'pair': pair})
+            # dataframe = strategy_safe_wrapper(
+            #         self._analyze_ticker_internal, message=""
+            #     )(dataframe, {'pair': pair})
             
             # Check dataframe integrity
             # try:
