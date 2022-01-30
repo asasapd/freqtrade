@@ -411,8 +411,10 @@ class FreqtradeBot(LoggingMixin):
         :return: True if a trade has been created.
         """
         logger.debug(f"create_trade for pair {pair}")
-
-        analyzed_df, _ = self.dataprovider.get_analyzed_dataframe(pair, self.strategy.timeframe)
+        timeframe =  self.strategy.timeframe
+        if self.config.get('single_transactions', False):
+            timeframe = None            
+        analyzed_df, _ = self.dataprovider.get_analyzed_dataframe(pair, timeframe)
         nowtime = analyzed_df.iloc[-1]['date'] if len(analyzed_df) > 0 else None
         if self.strategy.is_pair_locked(pair, nowtime):
             lock = PairLocks.get_pair_longest_lock(pair, nowtime)
@@ -434,7 +436,7 @@ class FreqtradeBot(LoggingMixin):
         # running get_signal on historical data fetched
         (buy, sell, buy_tag, _) = self.strategy.get_signal(
             pair,
-            self.strategy.timeframe,
+            timeframe,
             analyzed_df
         )
 

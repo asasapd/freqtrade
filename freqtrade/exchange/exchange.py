@@ -6,15 +6,16 @@ import asyncio
 import http
 import inspect
 import logging
+import time
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from math import ceil
-import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import arrow
 import ccxt
 import ccxt.async_support as ccxt_async
+import pandas as pd
 from cachetools import TTLCache
 from ccxt.base.decimal_to_precision import (ROUND_DOWN, ROUND_UP, TICK_SIZE, TRUNCATE,
                                             decimal_to_precision)
@@ -22,7 +23,8 @@ from pandas import DataFrame
 
 from freqtrade.constants import (DEFAULT_AMOUNT_RESERVE_PERCENT, NON_OPEN_EXCHANGE_STATES,
                                  ListPairsWithTimeframes)
-from freqtrade.data.converter import ohlcv_to_dataframe, trades_dict_to_list, transactions_to_dataframe
+from freqtrade.data.converter import (ohlcv_to_dataframe, trades_dict_to_list,
+                                      transactions_to_dataframe)
 from freqtrade.exceptions import (DDosProtection, ExchangeError, InsufficientFundsError,
                                   InvalidOrderException, OperationalException, PricingError,
                                   RetryableOrderError, TemporaryError)
@@ -1324,7 +1326,6 @@ class Exchange:
         cached_pairs = []
         # Gather coroutines to run
         for pair in set(pair_list):
-            results[pair] = []
             if (pair not in self._single_transactions or not cache
                     or self._now_is_time_to_refresh(pair, None)): # Need to be refreshed
                 if not since_ms and 1000 > 1: # Not since and more than one candle
@@ -1332,15 +1333,23 @@ class Exchange:
                     one_call = 60000 * 1 # Max 10 minutes
                     # move_to = one_call * self.required_candle_call_count
                     # move_to = 604800000 # 1 week
-                    move_to = 60000 * 5 # 1 week
-                    now = self._pairs_last_refresh_time.get((pair, None), arrow.utcnow())
-                    since_ms = int((now - timedelta(seconds=move_to // 1000)).timestamp() * 1000)
+                    if self._pairs_last_refresh_time.get((pair, None), False):
+                        move_to = (arrow.now() - arrow.get(self._pairs_last_refresh_time[(pair, None)])).seconds
+                    else:
+                        move_to = 60 * 60 * 24 * 1
+                    now = arrow.utcnow()
+                    since_ms = int((now - timedelta(seconds=move_to)).timestamp() * 1000)
 
                 if since_ms:
+                    if pair not in results:
+                        results[pair] = []    
                     results[pair].extend(self._fetch_trades_end(
                         pair, since=since_ms, end=now.timestamp()*1000))
+                    
                 else:
                     # One call ... "regular" refresh
+                    if pair not in results:
+                        results[pair] = []
                     results[pair].extend(self._fetch_trades_end(
                         pair, since=since_ms, end=now.timestamp()*1000))
             else:
@@ -1359,8 +1368,9 @@ class Exchange:
                 )
                 old = self.single_transaction(pair, copy=False)
                 if len(old) > 0:
-                    print("Need to merge")
-                    # transactions_df = merge_transactions(old, transactions_df)
+                    print(pair)
+                    transactions_df = self.merge_transactions(old, transactions_df)
+                    print(transactions_df)
                 if cache:
                     self._single_transactions[pair] = transactions_df
                 results_df[pair] = transactions_df
@@ -1378,6 +1388,16 @@ class Exchange:
 
         return results_df
     
+    def merge_transactions(self, df1: DataFrame, df2: DataFrame):
+        merged = pd.concat([df1, df2])
+        data = merged.groupby(by='id', as_index=False, sort=True).agg({
+            'price': 'max',
+            'cost': 'max',
+            'amount': 'max',
+            'side': 'max',
+            'date': 'max'
+        })
+        return data
     def refresh_latest_ohlcv(self, pair_list: ListPairsWithTimeframes, *,
                              since_ms: Optional[int] = None, cache: bool = True
                              ) -> Dict[Tuple[str, str], DataFrame]:
@@ -1522,7 +1542,7 @@ class Exchange:
         trades = []
         try:
             # fetch trades asynchronously
-            ten_minutes = 60000 * 10
+            ten_minutes = 60000 * 60
             if params:
                 logger.debug("Fetching trades for pair %s, params: %s ", pair, params)
                 orders = self._api.fetch_trades(pair, since)
@@ -1533,12 +1553,12 @@ class Exchange:
                     '(' + arrow.get(since // 1000).isoformat() + ') ' if since is not None else ''
                 )
                 while since < end:
-                    print('since: ' + str(since)) #uncomment this line of code for verbose download
+                    print('since: ' + str(since) + 'end: ' + str(end)) #uncomment this line of code for verbose download
                     try:
-                        orders = self._api.fetch_trades(pair, since)
+                        orders = self._api.fetch_trades(pair, since, limit=1000)
                     except ccxt.RequestTimeout:
                         time.sleep(5)
-                        orders = self._api.fetch_trades(pair, since)
+                        orders = self._api.fetch_trades(pair, since, limit=1000)
 
                     if len(orders) > 0:
 

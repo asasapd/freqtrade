@@ -525,6 +525,32 @@ class IStrategy(ABC, HyperStrategyMixin):
         dataframe = self.advise_sell(dataframe, metadata)
         return dataframe
 
+    def _analyze_ticker_internal_transactions(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        """
+        # Parses the given candle (OHLCV) data and returns a populated DataFrame
+        # add several TA indicators and buy signal to it
+        # WARNING: Used internally only, may skip analysis if `process_only_new_candles` is set.
+        # :param dataframe: Dataframe containing data from exchange
+        # :param metadata: Metadata dictionary with additional data (e.g. 'pair')
+        # :return: DataFrame of candle (OHLCV) data with indicator data and signals added
+        """
+        pair = str(metadata.get('pair'))
+
+        # Test if seen this pair and last candle before.
+        # always run if process_only_new_candles is set to false
+        if self.dp:
+            self.dp._set_cached_df(pair, None, dataframe)
+        dataframe['buy'] = 0
+        dataframe['sell'] = 0
+        dataframe['buy_tag'] = None
+        dataframe['exit_tag'] = None
+
+        # Other Defs in strategy that want to be called every loop here
+        # twitter_sell = self.watch_twitter_feed(dataframe, metadata)
+        logger.debug("Loop Analysis Launched")
+
+        return dataframe
+    
     def _analyze_ticker_internal(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
         Parses the given candle (OHLCV) data and returns a populated DataFrame
@@ -570,24 +596,19 @@ class IStrategy(ABC, HyperStrategyMixin):
         if self.config['single_transactions']:
             dataframe = self.dp.single_transactions(pair)
             
-            # dataframe = strategy_safe_wrapper(
-            #         self._analyze_ticker_internal, message=""
-            #     )(dataframe, {'pair': pair})
-            
-            # Check dataframe integrity
-            # try:
-            #     df_len, df_close, df_date = self.preserve_df(dataframe)
-
-            #     dataframe = strategy_safe_wrapper(
-            #         self._analyze_ticker_internal, message=""
-            #     )(dataframe, {'pair': pair})
-
-            #     self.assert_df(dataframe, df_len, df_close, df_date)
-            # except StrategyError as error:
-            #     logger.warning(f"Unable to analyze candle (OHLCV) data for pair {pair}: {error}")
-            #     return
             if not isinstance(dataframe, DataFrame) or dataframe.empty:
                 logger.warning('Empty transactions data for pair %s', pair)
+                return
+            try:
+                df_len, df_id, df_date = self.preserve_df_transactions(dataframe)
+
+                dataframe = strategy_safe_wrapper(
+                    self._analyze_ticker_internal_transactions, message=""
+                )(dataframe, {'pair': pair})
+
+                self.assert_df_transactions(dataframe, df_len, df_id, df_date)
+            except StrategyError as error:
+                logger.warning(f"Unable to analyze trnsactions data for pair {pair}: {error}")
                 return
         else:
             dataframe = self.dp.ohlcv(pair, self.timeframe)
@@ -623,6 +644,11 @@ class IStrategy(ABC, HyperStrategyMixin):
     def preserve_df(dataframe: DataFrame) -> Tuple[int, float, datetime]:
         """ keep some data for dataframes """
         return len(dataframe), dataframe["close"].iloc[-1], dataframe["date"].iloc[-1]
+    
+    @staticmethod
+    def preserve_df_transactions(dataframe: DataFrame) -> Tuple[int, int, datetime]:
+        """ keep some data for dataframes """
+        return len(dataframe), dataframe["id"].iloc[-1], dataframe["date"].iloc[-1]
 
     def assert_df(self, dataframe: DataFrame, df_len: int, df_close: float, df_date: datetime):
         """
@@ -646,6 +672,28 @@ class IStrategy(ABC, HyperStrategyMixin):
             else:
                 raise StrategyError(message)
 
+    def assert_df_transactions(self, dataframe: DataFrame, df_len: int, df_id: int, df_date: datetime):
+        """
+        Ensure dataframe (length, last candle) was not modified, and has all elements we need.
+        """
+        message_template = "Dataframe returned from strategy has mismatching {}."
+        message = ""
+        if dataframe is None:
+            message = "No dataframe returned (return statement missing?)."
+        elif 'buy' not in dataframe:
+            message = "Buy column not set."
+        elif df_len != len(dataframe):
+            message = message_template.format("length")
+        elif df_id != dataframe["id"].iloc[-1]:
+            message = message_template.format("last id")
+        elif df_date != dataframe["date"].iloc[-1]:
+            message = message_template.format("last date")
+        if message:
+            if self.disable_dataframe_checks:
+                logger.warning(message)
+            else:
+                raise StrategyError(message)
+            
     def get_signal(
         self,
         pair: str,
@@ -669,15 +717,16 @@ class IStrategy(ABC, HyperStrategyMixin):
         # Explicitly convert to arrow object to ensure the below comparison does not fail
         latest_date = arrow.get(latest_date)
 
-        # Check if dataframe is out of date
-        timeframe_minutes = timeframe_to_minutes(timeframe)
-        offset = self.config.get('exchange', {}).get('outdated_offset', 5)
-        if latest_date < (arrow.utcnow().shift(minutes=-(timeframe_minutes * 2 + offset))):
-            logger.warning(
-                'Outdated history for pair %s. Last tick is %s minutes old',
-                pair, int((arrow.utcnow() - latest_date).total_seconds() // 60)
-            )
-            return False, False, None, None
+        if timeframe:
+            # Check if dataframe is out of date
+            timeframe_minutes = timeframe_to_minutes(timeframe)
+            offset = self.config.get('exchange', {}).get('outdated_offset', 5)
+            if latest_date < (arrow.utcnow().shift(minutes=-(timeframe_minutes * 2 + offset))):
+                logger.warning(
+                    'Outdated history for pair %s. Last tick is %s minutes old',
+                    pair, int((arrow.utcnow() - latest_date).total_seconds() // 60)
+                )
+                return False, False, None, None
 
         buy = latest[SignalType.BUY.value] == 1
 
@@ -693,12 +742,13 @@ class IStrategy(ABC, HyperStrategyMixin):
 
         logger.debug('trigger: %s (pair=%s) buy=%s sell=%s',
                      latest['date'], pair, str(buy), str(sell))
-        timeframe_seconds = timeframe_to_seconds(timeframe)
-        if self.ignore_expired_candle(latest_date=latest_date,
-                                      current_time=datetime.now(timezone.utc),
-                                      timeframe_seconds=timeframe_seconds,
-                                      buy=buy):
-            return False, sell, buy_tag, exit_tag
+        if timeframe:
+            timeframe_seconds = timeframe_to_seconds(timeframe)
+            if self.ignore_expired_candle(latest_date=latest_date,
+                                        current_time=datetime.now(timezone.utc),
+                                        timeframe_seconds=timeframe_seconds,
+                                        buy=buy):
+                return False, sell, buy_tag, exit_tag
         return buy, sell, buy_tag, exit_tag
 
     def ignore_expired_candle(self, latest_date: datetime, current_time: datetime,
