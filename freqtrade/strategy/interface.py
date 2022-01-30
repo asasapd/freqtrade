@@ -536,14 +536,19 @@ class IStrategy(ABC, HyperStrategyMixin):
         """
         pair = str(metadata.get('pair'))
 
-        # Test if seen this pair and last candle before.
-        # always run if process_only_new_candles is set to false
-        if self.dp:
-            self.dp._set_cached_df(pair, None, dataframe)
-        dataframe['buy'] = 0
-        dataframe['sell'] = 0
-        dataframe['buy_tag'] = None
-        dataframe['exit_tag'] = None
+        if (not self.process_only_new_candles or
+                self._last_candle_seen_per_pair.get(pair, None) != dataframe.iloc[-1]['date']):
+            # Defs that only make change on new candle data.
+            dataframe = self.analyze_ticker(dataframe, metadata)
+            self._last_candle_seen_per_pair[pair] = dataframe.iloc[-1]['date']
+            if self.dp:
+                self.dp._set_cached_df(pair, self.timeframe, dataframe)
+        else:
+            logger.debug("Skipping TA Analysis for already analyzed candle")
+            dataframe['buy'] = 0
+            dataframe['sell'] = 0
+            dataframe['buy_tag'] = None
+            dataframe['exit_tag'] = None
 
         # Other Defs in strategy that want to be called every loop here
         # twitter_sell = self.watch_twitter_feed(dataframe, metadata)

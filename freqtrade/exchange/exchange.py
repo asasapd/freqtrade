@@ -1336,7 +1336,7 @@ class Exchange:
                     if self._pairs_last_refresh_time.get((pair, None), False):
                         move_to = (arrow.now() - arrow.get(self._pairs_last_refresh_time[(pair, None)])).seconds
                     else:
-                        move_to = 60 * 60 * 24 * 1
+                        move_to = 60 * 60 * 24
                     now = arrow.utcnow()
                     since_ms = int((now - timedelta(seconds=move_to)).timestamp() * 1000)
 
@@ -1555,10 +1555,10 @@ class Exchange:
                 while since < end:
                     print('since: ' + str(since) + 'end: ' + str(end)) #uncomment this line of code for verbose download
                     try:
-                        orders = self._api.fetch_trades(pair, since, limit=1000)
+                        orders = self._api.fetch_trades(pair, since, limit=5000)
                     except ccxt.RequestTimeout:
                         time.sleep(5)
-                        orders = self._api.fetch_trades(pair, since, limit=1000)
+                        orders = self._api.fetch_trades(pair, since, limit=5000)
 
                     if len(orders) > 0:
 
