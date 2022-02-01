@@ -7,7 +7,7 @@ import traceback
 from datetime import datetime, timezone
 from math import isclose
 from threading import Lock
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 from freqtrade import __version__, constants
 from freqtrade.configuration import validate_config_consistency
@@ -613,6 +613,10 @@ class FreqtradeBot(LoggingMixin):
         fee = self.exchange.get_fee(symbol=pair, taker_or_maker='maker')
         # This is a new trade
         if trade is None:
+            try:
+                timeframe = timeframe_to_minutes(self.config['timeframe'])
+            except TypeError:
+                timeframe = None
             trade = Trade(
                 pair=pair,
                 stake_amount=stake_amount,
@@ -629,7 +633,7 @@ class FreqtradeBot(LoggingMixin):
                 fee_open_currency=None,
                 strategy=self.strategy.get_strategy_name(),
                 buy_tag=buy_tag,
-                timeframe=timeframe_to_minutes(self.config['timeframe'])
+                timeframe=timeframe
             )
         else:
             # This is additional buy, we reset fee_open_currency so timeout checking can work

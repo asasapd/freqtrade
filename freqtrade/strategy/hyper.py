@@ -303,6 +303,8 @@ class HyperStrategyMixin:
         Initialize hyperoptable strategy mixin.
         """
         self.config = config
+        if self.config["single_transactions"]:
+            self.config["timeframe"] = None
         self.ft_buy_params: List[BaseParameter] = []
         self.ft_sell_params: List[BaseParameter] = []
         self.ft_protection_params: List[BaseParameter] = []

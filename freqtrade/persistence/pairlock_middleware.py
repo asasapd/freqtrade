@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timezone
+import time
 from typing import List, Optional
 
 from freqtrade.exchange import timeframe_to_next_date
@@ -41,6 +42,8 @@ class PairLocks():
         :param reason: Reason string that will be shown as reason for the lock
         :param now: Current timestamp. Used to determine lock start time.
         """
+        if not PairLocks.timeframe:
+            PairLocks.timeframe = "30m"
         lock = PairLock(
             pair=pair,
             lock_time=now or datetime.now(timezone.utc),

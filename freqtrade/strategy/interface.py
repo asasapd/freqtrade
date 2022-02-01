@@ -504,7 +504,7 @@ class IStrategy(ABC, HyperStrategyMixin):
         :returns: locking state of the pair in question.
         """
 
-        if not candle_date:
+        if not candle_date or self.timeframe is None:
             # Simple call ...
             return PairLocks.is_pair_locked(pair)
         else:
