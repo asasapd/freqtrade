@@ -1328,30 +1328,18 @@ class Exchange:
         for pair in set(pair_list):
             if (pair not in self._single_transactions or not cache
                     or self._now_is_time_to_refresh(pair, None)): # Need to be refreshed
-                if not since_ms and 1000 > 1: # Not since and more than one candle
-                    # Multiple calls for one pair - to get more history
-                    one_call = 60000 * 1 # Max 10 minutes
-                    # move_to = one_call * self.required_candle_call_count
-                    # move_to = 604800000 # 1 week
-                    if self._pairs_last_refresh_time.get((pair, None), False):
-                        move_to = (arrow.now() - arrow.get(self._pairs_last_refresh_time[(pair, None)])).seconds
-                    else:
-                        move_to = 60 * 60 * 24
-                    now = arrow.utcnow()
-                    since_ms = int((now - timedelta(seconds=move_to)).timestamp() * 1000)
-
-                if since_ms:
-                    if pair not in results:
-                        results[pair] = []    
-                    results[pair].extend(self._fetch_trades_end(
-                        pair, since=since_ms, end=now.timestamp()*1000))
-                    
+                
+                if self._pairs_last_refresh_time.get((pair, None), False):
+                    move_to = (arrow.now() - arrow.get(self._pairs_last_refresh_time[(pair, None)])).seconds
                 else:
-                    # One call ... "regular" refresh
-                    if pair not in results:
-                        results[pair] = []
-                    results[pair].extend(self._fetch_trades_end(
-                        pair, since=since_ms, end=now.timestamp()*1000))
+                    move_to = 60 * 60 * 24
+                now = arrow.utcnow()
+                since_ms = int((now - timedelta(seconds=move_to)).timestamp() * 1000)
+
+                if pair not in results:
+                    results[pair] = []    
+                results[pair].extend(self._fetch_trades_end(
+                    pair, since=since_ms, end=now.timestamp()*1000))
             else:
                 logger.debug(
                     "Using cached single_transacations data for pair %s ...",
@@ -1368,9 +1356,7 @@ class Exchange:
                 )
                 old = self.single_transaction(pair, copy=False)
                 if len(old) > 0:
-                    print(pair)
                     transactions_df = self.merge_transactions(old, transactions_df)
-                    print(transactions_df)
                 if cache:
                     self._single_transactions[pair] = transactions_df
                 results_df[pair] = transactions_df
@@ -1476,7 +1462,7 @@ class Exchange:
             # Timeframe in seconds
             interval_in_sec = timeframe_to_seconds(timeframe)
         else:
-            interval_in_sec = 30
+            interval_in_sec = 5
         return not ((self._pairs_last_refresh_time.get((pair, timeframe), 0)
                     + interval_in_sec) >= arrow.utcnow().int_timestamp)
     
@@ -1542,7 +1528,7 @@ class Exchange:
         trades = []
         try:
             # fetch trades asynchronously
-            ten_minutes = 60000 * 60
+            ten_minutes = 60000 * 60 * 60
             if params:
                 logger.debug("Fetching trades for pair %s, params: %s ", pair, params)
                 orders = self._api.fetch_trades(pair, since)
@@ -1553,7 +1539,7 @@ class Exchange:
                     '(' + arrow.get(since // 1000).isoformat() + ') ' if since is not None else ''
                 )
                 while since < end:
-                    print('since: ' + str(since) + 'end: ' + str(end)) #uncomment this line of code for verbose download
+                    # print('since: ' + str(since) + 'end: ' + str(end) + 'for pair' + str(pair)) #uncomment this line of code for verbose download
                     try:
                         orders = self._api.fetch_trades(pair, since, limit=5000)
                     except ccxt.RequestTimeout:

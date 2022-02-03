@@ -70,7 +70,6 @@ def clean_transactions_dataframe(data: DataFrame, pair: str, *,
     })
     
     if fill_missing:
-        print("Fill missing not implemented!!!!!")
         return data
     else:
         return data
